@@ -1,0 +1,117 @@
+name: Android CI & APK Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths-ignore:
+      - 'APK_DOWNLOAD/**'
+      - '.build-outputs/**'
+      - 'README.md'
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Validate Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew || true
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --continue || true
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Locate and Validate APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: No APK found after assembleDebug!"
+            exit 1
+          fi
+          echo "Found APK at: $APK_PATH"
+          
+          mkdir -p .build-outputs
+          mkdir -p APK_DOWNLOAD
+          
+          cp "$APK_PATH" .build-outputs/app-debug.apk
+          cp "$APK_PATH" APK_DOWNLOAD/app-debug.apk
+          
+          # Size check
+          SIZE=$(stat -c%s APK_DOWNLOAD/app-debug.apk)
+          echo "APK Size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "ERROR: APK is smaller than 1MB ($SIZE bytes)!"
+            exit 1
+          fi
+          
+          # File validity check
+          unzip -t APK_DOWNLOAD/app-debug.apk
+          
+          # SHA256 integrity comparison
+          SHA1=$(sha256sum .build-outputs/app-debug.apk | awk '{print $1}')
+          SHA2=$(sha256sum APK_DOWNLOAD/app-debug.apk | awk '{print $1}')
+          echo "SHA256 (.build-outputs): $SHA1"
+          echo "SHA256 (APK_DOWNLOAD):  $SHA2"
+          if [ "$SHA1" != "$SHA2" ]; then
+            echo "ERROR: Checksum mismatch between APK copies!"
+            exit 1
+          fi
+          
+          # Update download info
+          DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          cat <<EOF > APK_DOWNLOAD/README.txt
+          ==================================================
+          Political Science 2nd Paper Suggestion Pro
+          Debug APK Distribution Information
+          ==================================================
+          File: app-debug.apk
+          Build Date: $DATE
+          Build Type: Debug
+          Size: $((SIZE / 1024)) KB ($SIZE bytes)
+          SHA256: $SHA1
+          Subject: Political Science 2nd Paper (Code: 111903)
+          University: National University (Degree & Honours 1st Year)
+          
+          Installation Instructions:
+          1. Enable "Install Unknown Apps" in your Android Settings.
+          2. Transfer or download app-debug.apk onto your Android device.
+          3. Tap the file to install and open.
+          ==================================================
+          EOF
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: APK_DOWNLOAD/app-debug.apk
+          if-no-files-found: error
+
+      - name: Commit Updated APK to Repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .build-outputs/app-debug.apk APK_DOWNLOAD/app-debug.apk APK_DOWNLOAD/README.txt
+          git diff --cached --quiet || git commit -m "build: update debug APK [skip ci]"
+          git push || true

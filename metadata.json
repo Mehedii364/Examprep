@@ -1,0 +1,6 @@
+{
+  "name": "Political Science 2nd Paper Suggestion Pro",
+  "description": "AI-powered exam suggestions, repeat analysis, model answers, audio reader, and study notes for Political Science 2nd Paper (UK & USA Political Systems).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
